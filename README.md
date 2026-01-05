@@ -31,36 +31,75 @@ flatpak install flathub org.openscad.OpenSCAD
 flatpak run org.openscad.OpenSCAD
 ```
 2. Click `Open` and select the `devkit/tile.scad`.
-3. In the In-app editor uncomment the line of the `.svg` file you want to use.
+3. In the in-app editor, set `ICON_SVG` to the SVG you want to emboss/engrave on the tile (see the [icon selector block](devkit/tile.scad)). Example:
 
 ```scad
-ICON_SVG = "icons/misc/digital-ocean.svg"
+ICON_SVG = "icons/misc/digital-ocean.svg";
 ```
-4. Click `Render` & preview the results
-5. Click `Export as STL` save at desired location. 
-6. Import the new `.stl` into your slicer software & print. 
+4. Adjust any parameters you want to tweak (see [Tile parameters](#tile-parameters)).
+5. Click `Render` and preview the results.
+6. Click `Export as STL` and save at the desired location.
+7. Import the new `.stl` into your slicer software and print.
 
 ## Create a New Pocket (.stl)
 1. Click `Open` and select the `devkit/pocket.scad`.
 2. In the In-app editor uncomment the line of the `.svg` file you want to use.
 
 ```scad
-ICON_SVG = "icons/misc/digital-ocean.svg"
+ICON_SVG = "icons/misc/digital-ocean.svg";
 ```
-3. Click `Render` & preview the results
-4. Click `Export as STL` save at desired location. 
-5. Import the new `.stl` into your slicer software & print. 
+3. Adjust any parameters you want to tweak (see [Pocket parameters](#pocket-parameters)).
+4. Click `Render` and preview the results.
+5. Click `Export as STL` and save at the desired location.
+6. Import the new `.stl` into your slicer software and print.
 
-Parameter list
-USE_MAGNET_CUTOUTS
-USE_SPINNER_HOLE
-USE_TILE_RETENTION = True //
+---
+
+## Tile parameters
+The most common parameters for `devkit/tile.scad` live near the top of the file and can be edited directly in OpenSCAD:
+
+| Parameter | What it does | Default (from `lib.scad`) |
+| --- | --- | --- |
+| `ICON_SVG` | Path to the SVG you want recessed/embossed. Uncomment an entry in the selector list or set your own. | `"icons/misc/docker.svg"` |
+| `TILE_HEIGHT` | Overall tile thickness. | `TILE_H = 1.2` mm |
+| `ICON_DEPTH` | Depth of the icon relief. | `ICON_H = 0.5` mm |
+| `TILE_CLEARANCE` | Per-side clearance so the tile fits a matching pocket. Increase if your printer is tight. | `FIT = CLEARANCE/2 = 0.05` mm |
+| `USE_SPINNER_HOLE` | Add/remove the finger/spinner hole. | `true` |
+| `SPINNER_DIAMETER` | Spinner hole diameter. | `SPINNER_D = 20` mm |
+| `TILE_D` | Overall tile width/diameter. Slightly smaller than the pocket (`COASTER_D - 2.4`). | `101.6 - 2.4` mm |
+
+Tips:
+- If your tiles bind in pockets, bump `TILE_CLEARANCE` up by `0.05–0.10` mm and re-render.
+- Turn off `USE_SPINNER_HOLE` if you prefer a solid face for more icon area.
+
+## Pocket parameters
+Key parameters for `devkit/pocket.scad` are also defined at the top of the file:
+
+| Parameter | What it does | Default (from `lib.scad`) |
+| --- | --- | --- |
+| `ICON_SVG` | Path to the SVG shown on the pocket face. | `"icons/misc/docker.svg"` |
+| `POCKET_HEIGHT` | Overall pocket thickness. | `POCKET_H = 3.0` mm |
+| `ICON_DEPTH` | Depth of the icon recess. | `ICON_H = 0.5` mm |
+| `POCKET_CLEARANCE` | Per-side clearance so tiles slide in/out easily. | `FIT = 0.05` mm |
+| `USE_SPINNER_HOLE` | Add/remove the spinner/carry hole. | `true` |
+| `SPINNER_DIAMETER` | Spinner hole diameter. | `SPINNER_D = 20` mm |
+| `USE_MAGNET_CUTOUTS` | Include magnet cavities on the base. Disable if using adhesives instead of embedded magnets. | `true` |
+| `MAGNET_Z0` | Z-offset where magnet cavities start (controls bottom skin thickness). | `BOTTOM_SKIN = 0.3` mm |
+| `USE_TILE_RETENTION` | Adds a small lip to keep the tile from wobbling (octagon only). | `false` |
+| `RET_XY_CLEAR` | Side-to-side slack between the tile and retention lip. Lower = tighter. | `0.25` mm |
+| `RET_WALL_THICK` | Thickness of the retention lip wall. | `2.0` mm |
+| `RET_ANCHOR_Z` | How deep the retention lip sinks into the pocket top surface. | `0.6` mm |
+| `RET_Z_DEPTH` | How far the retention lip extends upward. Should exceed tile thickness. | `TILE_H + 2` mm |
+| `RET_DRAFT` | Small taper on the outer face of the retention lip. | `0.010` (scale factor) |
+
+Tips:
+- If magnets are loose, decrease `MAG_CLEAR` in `devkit/lib.scad` by `0.1–0.2` mm; if they do not fit, increase it.
+- `USE_TILE_RETENTION` is off by default—enable it when you want pockets to hold tiles firmly on mobile boards.
 
 ---
 
 Thank you to the OpenSCAD creators!
 
----
 ---
 
 ## What you can build
@@ -163,7 +202,7 @@ You’ll see parameters like these in the .scad files:
 - A pocket can include a magnet grid region intended to represent capabilities like:
 
   - ping/healthcheck, read, query, write, delete, admin, etc.
-- Use magnets (or empty cavities) as physical “bits” to show allowed actions
+- Use magnet inlays as physical “bits” to show allowed actions
 
 ---
 ## Repository layout (high level)
@@ -193,7 +232,7 @@ Planned enhancements (public-facing):
 
 ## Contributing
 
-Contributions are welcome—especially:
+Contributions are welcome and are most helpful aroudn:
 
 - new icon tiles (SVG additions + tested outputs)
 - geometry improvements (fit, tolerances, printability)
@@ -211,86 +250,6 @@ Third-party logos/icons (AWS, Docker, etc.) are trademarks of their respective o
 
 ## License
 
-Add your chosen license here (MIT/Apache-2.0/etc.).
- m 
-
----
-
-Tiles Parameters:
-- 
-
-Pocket Parameters: 
-- Magnet inserts
-- Retaining wall
-
-
----
-
-
-- [Marketing Messaging](#marketing-messaging-/-customer-value-proposition)
-    - [Design Architecture](#design-architecture)
-    - [Features](#features)
-    - [Components](#pieces)
-- [ARCHIVE TODO - COMPLETED](#archive-todo---completed)
-- [References](#references)
-
----
-
-### Design Architecture
-Uses (4) major components at this point:
-1. `icon`: The icon that will go onto the tile which includes things like Docker, nginx, PostgreSQL, and Cloud Services like AWS ECS.
-2. `tile`: This is a thin tile that displays the *icon*. 
-3. `pocket`: A magnetic component designed to display tiles for Digital Architectures & with a magnetic whiteboard in mind. 
-4. `case`: Acts as a carry case for the remaining `pocket` & `tile` components. 
-
-### Features
-1. `icon`: See above.
-2. `tile`: See above.
-3. `pocket`: Provides a way for a user to visually show how much access one system, VM or container should have to another.
-    - *Example*: (2) 4x2 grids for each side (left, right and bottom) section could allow you to show whether the system can:
-        - Ping the other system to see if it is operational
-        - Read data on the system
-        - Query data
-        - Modify data
-        - Delete data
-        - Admin access
-        - etc. (possibly not in that order but it should demonstrate the point). 
-4. `case`: 
- - Common Whiteboard Tools
-    - Coding spacing & indent guide:
-        - Solves writing code with inaccurate spacing & indents. 
-    - Protractor:
-        - Solves the user not being able to draw a perfect circle & .
-
-### Components
-1. `icon`: Provides the framework for the icon that will be put onto a tile. 
-2. `tile`: 
-    - [ ] Displays the icon in a way that can fit into a pocket or pocket slot.
-    - [ ] Has feet and holds to be are stackable on top of each other creating a type of collapse experience if the user has 6 tiles that should all be on top of each other like for ECS that has Fargate under it, auto scaling, ECS Service, ECS Service Task Definition and ECS Service EIN. You might want to have all of the ECS tiles stacked on top of each other so you can see them still but they aren't the current focus. 
-    - [x] Has a hole close to the top that is sized to be combined with the spinable arm on the case for a travel case, easier carry, can be used as a fidget spiner to hold it and can be used to hold it up. 
-3. `pocket`: 
-    - [ ] Has magnet inserts for usage with a magnetic whiteboard. 
-    - [ ] Has a pocket or slot for tiles to fit into. 
-4. `case`: 
-    - [ ] Carry case for the remaining `tile` & `pocket` components. 
-    - [ ] Has magnet inserts for the kit to be stored on a magnetic whiteboard. 
-    - [ ] A spinable arm to draw circles
-        - Example of a spinning gear: https://www.printables.com/model/909541-fidget-gear-ring
-        - Example of a collapsing Katana: https://www.youtube.com/shorts/zxEmTZwg8Pc
-        - [ ] Smallest collapsing layer of the arm should have storage for a Dry Erase Marker
-        - [ ] End of the arm should hold a dry erase arm with a snapping mechanism or naturally cup a marker for the user to use while tracking.
-        - [ ] Bonus: Should have holds that can be used to hold a dry erase marker while rotating at certain lengths maybe every 2 inches or whatever will fit.
-    - [ ] A coding indent spacing guide like a multitool ruler.
-        - Example of a multitool ruler with 1 spinning rotation: https://www.youtube.com/shorts/IwkuNI8ix4o
-            - Would need up to 10-20 layers but is likely limited due to material strength before getting to 10-20 layers.
-
----
-
-## Previous Prototype w Spinner
-Previously was able to get the prototype with larger magnets to work with the following parameters:
-- `MAG_D = 15.5;` THIS LIKELY NEEDS TO BE REDUCED BY 0.5 then added to MAG_CLEAR. 
-- `MAG_H = 3.0;`
-- `MAG_CLEAR = 0.5;` THIS LIKELY NEEDS TO BE INCREASED BY 0.5 and reduced from MAG_D. 
-
+This project is licensed under the [MIT License](LICENSE).
 
 ---
