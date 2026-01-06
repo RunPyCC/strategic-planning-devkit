@@ -1,16 +1,26 @@
 # strategic-planning-devkit
-What it is: A printable, modular “decision kit” for mapping systems, dependencies, and access on a whiteboard (or any magnetic surface).
+**What it is**: A printable, modular “decision kit” for mapping systems, dependencies, and access on a whiteboard (or any magnetic surface).
 
-How it works: Digital architecture are commonly comprised of reused service icons. Take an icon (`.svg`) -> 3D dev tool (`.stl`).
-    - v2 How it works: A printable, modular “decision kit” for mapping systems, dependencies, and access on a whiteboard (or any magnetic surface).
+**How it works**: Digital architecture are commonly comprised of reused service icons. Take an icon (`.svg`) -> 3D dev tool (`.stl`).
 
-Overview: This repo contains **parametric OpenSCAD models** that turn **SVG icons/logos** into physical **tiles**, plus **pockets** that hold tiles and optionally encode “levels of access” using magnet patterns—so you can make architecture and decision conversations more visual, faster.
+**Overview**: This repo contains **parametric OpenSCAD models** that turn **SVG icons/logos** into physical **tiles**, plus **pockets** that hold tiles and optionally encode “levels of access” using magnet patterns—so you can make architecture and decision conversations more visual, faster.
 
 
 ## Table of Contents
 - [Installation](#installation)
-- [Create a New Tile](#create-a-new-tile-(.stl))
-- [Create a New Pocket](#create-a-new-pocket-(.stl))
+- [Create a New Tile](#create-a-new-tile-.stl)
+- [Create a New Pocket](#create-a-new-pocket-.stl)
+- [What you can build](#what-you-can-build)
+- [Why this exists](#why-this-exists)
+- [Quick start](#quick-start)
+- [Using your own SVG icons](#using-your-own-svg-icons)
+- [Common customization knobs](#common-customization-knobs)
+- [Example workflows](#example-workflows)
+- [Repository layout (high level)](#repository-layout-high-level)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Trademark & logo note](#trademark--logo-note)
+- [License](#license)
 
 ## Installation 
 Need to install OpenSCAD (2021).
