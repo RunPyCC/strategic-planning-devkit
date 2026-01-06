@@ -1,18 +1,16 @@
 # strategic-planning-devkit
-- [ ] #TODO Decide whether to use or combine:
-    - v1 Purpose: A printable, modular “decision kit” for mapping systems, dependencies, and access on a whiteboard (or any magnetic surface).
-    - v2 Purpose: To facilitate whiteboard driven presentations through 3D printed icons representing digital architecture.
+What it is: A printable, modular “decision kit” for mapping systems, dependencies, and access on a whiteboard (or any magnetic surface).
 
-- [ ] #TODO Decide whether to use or combine:
-    - v1 How it works: Digital architecture are commonly comprised of reused service icons. Take an icon (`.svg`) -> 3D dev tool (`.stl`).
+How it works: Digital architecture are commonly comprised of reused service icons. Take an icon (`.svg`) -> 3D dev tool (`.stl`).
     - v2 How it works: A printable, modular “decision kit” for mapping systems, dependencies, and access on a whiteboard (or any magnetic surface).
 
-- [ ] #TODO Add a 'Why it matters':
-
-This repo contains **parametric OpenSCAD models** that turn **SVG icons/logos** into physical **tiles**, plus **pockets** that hold tiles and optionally encode “levels of access” using magnet patterns—so you can make architecture and decision conversations more visual, faster.
+Overview: This repo contains **parametric OpenSCAD models** that turn **SVG icons/logos** into physical **tiles**, plus **pockets** that hold tiles and optionally encode “levels of access” using magnet patterns—so you can make architecture and decision conversations more visual, faster.
 
 
 ## Table of Contents
+- [Installation](#installation)
+- [Create a New Tile](#create-a-new-tile-(.stl))
+- [Create a New Pocket](#create-a-new-pocket-(.stl))
 
 ## Installation 
 Need to install OpenSCAD (2021).
