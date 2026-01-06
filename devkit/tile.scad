@@ -9,8 +9,8 @@ USE_SPINNER_HOLE = true;
 SPINNER_DIAMETER = SPINNER_D;
 
 // NEW: make tile slightly smaller than the pocket
-// 1.2mm total reduction = 0.6mm per side
-TILE_D = COASTER_D - 2.4; // TEST 2 '2.4' | Next try 2.2mm
+// 2.4mm total reduction = 1.2mm per side
+TILE_D = COASTER_D - 2.4;
 
 // ---------------- Assembly ----------------
 tile_with_features(tile_height = TILE_HEIGHT,
