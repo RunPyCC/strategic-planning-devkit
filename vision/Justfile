@@ -2,7 +2,13 @@
 help:
     @just -l
 
-detect image:
+sync-if-needed:
+    @if [ ! -d .venv ]; then \
+        echo "No .venv found; running 'uv sync'..."; \
+        uv sync; \
+    fi
+
+detect image: sync-if-needed
     time uv run python whiteboard.py --image {{image}} \
     --ink_frac_max 0.025 \
     --oct_canny1 30 --oct_canny2 90 \
@@ -19,8 +25,6 @@ detect image:
     --icon_dilate_px 4 \
     --icon_core_radius_mul 0.55 \
     --icon_core_grow_iter 22 \
-    #--icon_library_dir ../devkit/icons/aws \
-    #--icon_allowlist aws-users,aws-lambda \
     --icon_match_min_conf 0.25 \
     --icon_crop_radius_mul 0.70 \
     --icon_template_size 256
@@ -28,5 +32,8 @@ detect image:
 clean:
     rm -rf detections.json debug_patches
 
-test:
+test: sync-if-needed
     just detect test_img/3d-dev-kit.webp
+
+sync:
+    time uv sync
