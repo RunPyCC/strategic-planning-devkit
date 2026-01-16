@@ -27,7 +27,12 @@ detect image: sync-if-needed
     --icon_core_grow_iter 22 \
     --icon_match_min_conf 0.25 \
     --icon_crop_radius_mul 0.70 \
-    --icon_template_size 256
+    --icon_library_dir ../devkit/icons/aws \
+    --icon_template_size 256 \
+    --icon_match_center_radius_mul 0.60 \
+    --icon_match_canny1 0 \
+    --icon_match_canny2 0 \
+    --icon_match_grad_pctl 92
 
 clean:
     rm -rf detections.json debug_patches
