@@ -18,21 +18,13 @@ detect image: sync-if-needed
     --oct_refine_cy_pix 14 --oct_refine_cy_step 2 \
     --oct_hole_gap_mul 0.70 \
     --icon_alpha 0.65 \
-    --icon_pctl_hi 90 \
-    --icon_pctl_lo 78 \
-    --icon_hyst_iter 3 \
-    --icon_center_radius_mul 0.70 \
     --icon_dilate_px 4 \
-    --icon_core_radius_mul 0.55 \
-    --icon_core_grow_iter 22 \
     --icon_match_min_conf 0.25 \
-    --icon_crop_radius_mul 0.70 \
     --icon_library_dir ../devkit/icons/aws \
+    --icon_allowlist aws-lambda,aws-users,aws-dynamodb,aws-s3 \
     --icon_template_size 256 \
-    --icon_match_center_radius_mul 0.60 \
-    --icon_match_canny1 0 \
-    --icon_match_canny2 0 \
-    --icon_match_grad_pctl 92
+    --icon_match_center_radius_mul 0.50 \
+    --icon_match_grad_pctl 88
 
 clean:
     rm -rf detections.json debug_patches

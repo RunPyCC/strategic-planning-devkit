@@ -7,7 +7,7 @@ import json
 import math
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -23,6 +23,10 @@ except Exception:
     Image = None
 
 
+# -----------------------------
+# Data structures
+# -----------------------------
+
 @dataclass
 class Det:
     x: int
@@ -34,9 +38,9 @@ class Det:
     ring_std: float
     ink_frac: float
 
-    octagon: Optional[np.ndarray] = None  # Nx1x2 int32 in image coords
+    octagon: Optional[np.ndarray] = None  # Nx1x2 int32
 
-    # debug
+    # debug / geometry
     cy: Optional[float] = None
     scale: Optional[float] = None
 
@@ -52,11 +56,11 @@ class Det:
 class IconTemplate:
     label: str
     edges: np.ndarray          # uint8 edge image (template_size x template_size)
-    dt_bank: List[np.ndarray]  # list of DTs per orientation bin
+    dt_bank: List[np.ndarray]  # oriented DT per bin
 
 
 # -----------------------------
-# Basic helpers
+# Common helpers
 # -----------------------------
 
 def clahe(gray: np.ndarray) -> np.ndarray:
@@ -80,7 +84,7 @@ def build_ink_masks(bgr: np.ndarray, dark_v_thresh: int, green_s_thresh: int) ->
 
 
 # -----------------------------
-# Hole detection scoring
+# Hole detection
 # -----------------------------
 
 def circle_delta(gray: np.ndarray, x: int, y: int, r: int) -> float:
@@ -249,7 +253,7 @@ def detect_holes(
 
 
 # -----------------------------
-# Regular octagon model + scoring
+# Octagon model + alignment
 # -----------------------------
 
 def regular_octagon_points(cx: float, cy: float, apothem: float) -> np.ndarray:
@@ -368,20 +372,24 @@ def to_int_contour(poly8: np.ndarray) -> np.ndarray:
 
 
 # -----------------------------
-# Icon extraction (mask) + purple overlay
+# Icon edge extraction (USED FOR BOTH overlay + matching)
 # -----------------------------
+
 def extract_icon_edges_from_gray_roi(
     roi_gray: np.ndarray,
     mask: np.ndarray,
     pctl: float = 92.0,
 ) -> np.ndarray:
     """
-    Robust emboss edge extractor:
+    This is THE ONE feature used for:
+      - purple overlay
+      - SVG matching
+
+    Steps:
       - CLAHE
-      - Sobel gradient magnitude
-      - normalize within mask
-      - keep top pctl% gradient pixels within mask
-    Returns uint8 0/255.
+      - Sobel magnitude
+      - percentile threshold (within mask)
+      - light close
     """
     g = clahe(roi_gray)
     g = cv2.GaussianBlur(g, (5, 5), 0)
@@ -390,11 +398,11 @@ def extract_icon_edges_from_gray_roi(
     gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
     mag = cv2.magnitude(gx, gy)
 
-    # normalize magnitude to 0..255 using masked percentiles
     vals = mag[mask > 0]
     if vals.size < 50:
         return np.zeros_like(mask)
 
+    # normalize inside mask
     p5, p95 = np.percentile(vals, [5, 95])
     denom = max(1e-6, float(p95 - p5))
     magn = ((mag - float(p5)) * (255.0 / denom))
@@ -405,122 +413,91 @@ def extract_icon_edges_from_gray_roi(
 
     edges = np.zeros_like(mask)
     edges[(magn >= thr) & (mask > 0)] = 255
-
-    # connect small gaps a bit, but don't erase thin lines
     edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations=1)
-
     return edges
 
 
-def overlay_mask_purple(
-    debug_bgr_roi: np.ndarray,
-    mask: np.ndarray,
-    purple_bgr: Tuple[int, int, int],
-    alpha: float,
-) -> None:
+def overlay_mask_purple(roi_dbg: np.ndarray, mask: np.ndarray, alpha: float) -> None:
     if cv2.countNonZero(mask) == 0:
         return
-    overlay = debug_bgr_roi.copy()
-    overlay[mask > 0] = np.array(purple_bgr, dtype=np.uint8)
-    cv2.addWeighted(overlay, alpha, debug_bgr_roi, 1.0 - alpha, 0, dst=debug_bgr_roi)
-
-
-def overlay_icon_purple_and_return_mask(
-    args,
-    debug_bgr: np.ndarray,
-    gray: np.ndarray,
-    det: Det,
-    apothem: float,
-    purple_bgr: Tuple[int, int, int],
-    alpha: float,
-    center_radius_mul: float,
-    dilate_px: int,
-    pctl_hi: float,
-    pctl_lo: float,
-    hyst_iter: int,
-    core_radius_mul: float,
-    core_grow_iter: int,
-) -> Tuple[Optional[np.ndarray], Optional[Tuple[int, int, int, int]], Optional[Tuple[float, float]]]:
-    """
-    Overlays purple and returns (keep_mask, roi_xywh, (cx_roi, cy_roi)) for matching.
-    """
-    if det.octagon is None:
-        return None, None, None
-
-    H, W = gray.shape[:2]
-    poly = det.octagon
-
-    x, y, w, h = cv2.boundingRect(poly)
-    x0 = max(0, x)
-    y0 = max(0, y)
-    x1 = min(W, x + w)
-    y1 = min(H, y + h)
-    if x1 <= x0 or y1 <= y0:
-        return None, None, None
-
-    roi_gray = gray[y0:y1, x0:x1]
-    roi_dbg = debug_bgr[y0:y1, x0:x1]
-
-    # octagon mask in ROI
-    mask_oct = np.zeros((y1 - y0, x1 - x0), np.uint8)
-    poly_roi = poly.copy()
-    poly_roi[:, 0, 0] -= x0
-    poly_roi[:, 0, 1] -= y0
-    cv2.fillPoly(mask_oct, [poly_roi], 255)
-
-    cx_roi = float(det.x) - x0
-    cy_roi = float(det.cy if det.cy is not None else det.y) - y0
-    rad = max(10, int(center_radius_mul * float(apothem)))
-
-    mask_center = np.zeros_like(mask_oct)
-    cv2.circle(mask_center, (int(round(cx_roi)), int(round(cy_roi))), rad, 255, -1)
-    mask = cv2.bitwise_and(mask_oct, mask_center)
-    print("mask:", np.count_nonzero(mask))
-
-    keep = extract_icon_edges_from_gray_roi(
-        roi_gray,
-        mask,
-        pctl=args.icon_match_grad_pctl
-    )
-
-    overlay_mask_purple(roi_dbg, keep, purple_bgr=purple_bgr, alpha=alpha)
-    return keep, (x0, y0, x1 - x0, y1 - y0), (cx_roi, cy_roi)
+    overlay = roi_dbg.copy()
+    overlay[mask > 0] = np.array((255, 0, 255), dtype=np.uint8)
+    cv2.addWeighted(overlay, float(alpha), roi_dbg, 1.0 - float(alpha), 0, dst=roi_dbg)
 
 
 # -----------------------------
-# Icon template loading + matching
+# Oriented chamfer matching
+# -----------------------------
+
+def edge_orientation_bins(edges: np.ndarray, n_bins: int = 8) -> np.ndarray:
+    g = edges.astype(np.float32) / 255.0
+    gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
+    ang = (np.arctan2(gy, gx) + np.pi)  # [0..2pi]
+    bins = (ang * (n_bins / (2.0 * np.pi))).astype(np.int32) % n_bins
+    out = np.full(edges.shape, -1, dtype=np.int32)
+    out[edges > 0] = bins[edges > 0]
+    return out
+
+
+def oriented_dt_bank(edges: np.ndarray, n_bins: int = 8) -> List[np.ndarray]:
+    bins = edge_orientation_bins(edges, n_bins=n_bins)
+    banks: List[np.ndarray] = []
+    for b in range(n_bins):
+        m = (bins == b).astype(np.uint8) * 255
+        inv = (m == 0).astype(np.uint8) * 255
+        dt = cv2.distanceTransform(inv, cv2.DIST_L2, 3)
+        banks.append(dt)
+    return banks
+
+
+def oriented_chamfer_score(q_edges: np.ndarray, q_bins: np.ndarray, t_dt_bank: List[np.ndarray]) -> float:
+    ys, xs = np.where(q_edges > 0)
+    if xs.size < 30:
+        return float("inf")
+    vals = []
+    for y, x in zip(ys, xs):
+        b = int(q_bins[y, x])
+        if b < 0:
+            continue
+        vals.append(t_dt_bank[b][y, x])
+    if not vals:
+        return float("inf")
+    return float(np.mean(vals))
+
+
+def symmetric_oriented_chamfer(q_edges: np.ndarray, t_edges: np.ndarray, t_dt_bank: List[np.ndarray], n_bins: int = 8) -> float:
+    q_bins = edge_orientation_bins(q_edges, n_bins=n_bins)
+    fwd = oriented_chamfer_score(q_edges, q_bins, t_dt_bank)
+
+    q_dt_bank = oriented_dt_bank(q_edges, n_bins=n_bins)
+    t_bins = edge_orientation_bins(t_edges, n_bins=n_bins)
+    bwd = oriented_chamfer_score(t_edges, t_bins, q_dt_bank)
+
+    return float(fwd + bwd)
+
+
+# -----------------------------
+# SVG template loading
 # -----------------------------
 
 def rasterize_svg_to_gray(svg_path: str, size: int) -> np.ndarray:
     if cairosvg is None or Image is None:
         raise RuntimeError("SVG support requires cairosvg + pillow. Install: uv add cairosvg pillow")
-    png_bytes = cairosvg.svg2png(url=svg_path, output_width=size, output_height=size)
+
+    png_bytes = cairosvg.svg2png(
+        url=svg_path,
+        output_width=size,
+        output_height=size,
+    )
     pil = Image.open(io.BytesIO(png_bytes)).convert("L")
     return np.array(pil, dtype=np.uint8)
-
-
-def template_from_gray(gray: np.ndarray) -> Tuple[np.ndarray, int]:
-    """
-    Convert grayscale template to edge DT. Returns (dist_transform, edge_count).
-    """
-    # Normalize: binarize, then edges
-    _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # Ensure foreground lines are white-ish; invert if needed
-    if float(np.mean(bw)) > 127.0:
-        bw = 255 - bw
-
-    edges = cv2.Canny(bw, 40, 120)
-    edge_count = int(np.count_nonzero(edges))
-
-    inv = (edges == 0).astype(np.uint8) * 255
-    dist = cv2.distanceTransform(inv, cv2.DIST_L2, 3)  # float32
-    return dist, edge_count
 
 
 def load_icon_templates(svg_dir: str, size: int, allowlist: Optional[set[str]] = None, n_bins: int = 8) -> List[IconTemplate]:
     svgs = [os.path.join(svg_dir, fn) for fn in sorted(os.listdir(svg_dir)) if fn.lower().endswith(".svg")]
     templates: List[IconTemplate] = []
+
     for path in svgs:
         label = os.path.splitext(os.path.basename(path))[0]
         if allowlist is not None and label not in allowlist:
@@ -533,20 +510,17 @@ def load_icon_templates(svg_dir: str, size: int, allowlist: Optional[set[str]] =
 
         t_edges = cv2.Canny(bw, 40, 120)
         t_dt_bank = oriented_dt_bank(t_edges, n_bins=n_bins)
-
         templates.append(IconTemplate(label=label, edges=t_edges, dt_bank=t_dt_bank))
+
     return templates
 
 
-def icon_query_to_canvas(
-    keep_mask: np.ndarray,
-    cx_roi: float,
-    cy_roi: float,
-    size: int,
-    crop_radius: int,
-) -> np.ndarray:
-    # Start from your center crop, but then tighten to content bbox.
-    h, w = keep_mask.shape[:2]
+# -----------------------------
+# Query normalization (for matching)
+# -----------------------------
+
+def icon_query_to_canvas(edge_mask: np.ndarray, cx_roi: float, cy_roi: float, size: int, crop_radius: int) -> np.ndarray:
+    h, w = edge_mask.shape[:2]
     cx = int(round(cx_roi))
     cy = int(round(cy_roi))
 
@@ -554,15 +528,14 @@ def icon_query_to_canvas(
     y0 = max(0, cy - crop_radius)
     x1 = min(w, cx + crop_radius)
     y1 = min(h, cy + crop_radius)
-    patch = keep_mask[y0:y1, x0:x1]
+    patch = edge_mask[y0:y1, x0:x1]
     if patch.size == 0:
         return np.zeros((size, size), np.uint8)
 
     ys, xs = np.where(patch > 0)
     if xs.size < 8:
-        return np.zeros((size,size), np.uint8)
+        return np.zeros((size, size), np.uint8)
 
-    # Tight bbox around content + small padding
     pad = 6
     bx0 = max(0, int(xs.min()) - pad)
     by0 = max(0, int(ys.min()) - pad)
@@ -580,18 +553,8 @@ def icon_query_to_canvas(
     return cv2.resize(canvas, (size, size), interpolation=cv2.INTER_NEAREST)
 
 
-def chamfer_score(query_edges: np.ndarray, template_dist: np.ndarray) -> float:
-    ys, xs = np.where(query_edges > 0)
-    if xs.size < 25:
-        return float("inf")
-    vals = template_dist[ys, xs]
-    return float(np.mean(vals))
-
-
 def match_icon(
-    args,
-    roi_gray: np.ndarray,
-    mask: np.ndarray,
+    q_edges_roi: np.ndarray,
     cx_roi: float,
     cy_roi: float,
     apothem: float,
@@ -600,21 +563,12 @@ def match_icon(
     crop_radius_mul: float,
     n_bins: int = 8,
 ) -> Tuple[str, float, float, str, float]:
-    # Extract query emboss edges inside mask
-    q_edges_roi = extract_icon_edges_from_gray_roi(
-        roi_gray,
-        mask,
-        pctl=float(args.icon_match_grad_pctl),
-    )
-
     crop_radius = max(20, int(float(crop_radius_mul) * float(apothem)))
     q_canvas = icon_query_to_canvas(q_edges_roi, cx_roi, cy_roi, size=template_size, crop_radius=crop_radius)
 
-    print("q_edges_roi:", np.count_nonzero(q_edges_roi), "q_canvas:", np.count_nonzero(q_canvas))
     if int(np.count_nonzero(q_canvas)) < 15:
         return "unknown", 0.0, float("inf"), "unknown", float("inf")
 
-    # Build query edges (already edges), just ensure binary
     q_edges = (q_canvas > 0).astype(np.uint8) * 255
 
     scores: List[Tuple[float, str]] = []
@@ -626,7 +580,6 @@ def match_icon(
     best_score, best_label = scores[0]
     second_score, second_label = scores[1] if len(scores) > 1 else (float("inf"), "unknown")
 
-    # Confidence: scale to typical chamfer scores; smaller is better
     gap = float(second_score - best_score)
     scale = max(1e-6, 0.25 * (1.0 + best_score))
     conf = float(1.0 / (1.0 + math.exp(-(gap / scale))))
@@ -635,7 +588,7 @@ def match_icon(
 
 
 # -----------------------------
-# Output / debug drawing
+# Debug drawing + JSON helpers
 # -----------------------------
 
 def contour_to_points(contour: Optional[np.ndarray]) -> Optional[List[List[int]]]:
@@ -666,94 +619,20 @@ def draw_debug_base(bgr: np.ndarray, dets: List[Det]) -> np.ndarray:
 
 
 def draw_icon_label(dbg: np.ndarray, det: Det) -> None:
-    if det.octagon is None:
-        return
-    if not det.icon_label:
+    if det.octagon is None or not det.icon_label:
         return
 
     x, y, w, h = cv2.boundingRect(det.octagon)
-    label = det.icon_label
     conf = det.icon_conf if det.icon_conf is not None else 0.0
-    text = f"{label} ({conf:.2f})"
+    text = f"{det.icon_label} ({conf:.2f})"
 
-    # Place near top-left of octagon bbox, but inside the tile area a bit
     tx = x + 10
     ty = y + 30
 
-    # background for readability
     (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
     cv2.rectangle(dbg, (tx - 4, ty - th - 6), (tx + tw + 4, ty + 6), (255, 255, 255), -1)
     cv2.putText(dbg, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2, cv2.LINE_AA)
 
-def edge_orientation_bins(edges: np.ndarray, n_bins: int = 8) -> np.ndarray:
-    """
-    Given edges (0/255), compute orientation bin [0..n_bins-1] per pixel.
-    Non-edge pixels are set to -1.
-    """
-    g = edges.astype(np.float32) / 255.0
-    gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
-    ang = (np.arctan2(gy, gx) + np.pi)  # [0..2pi]
-    bins = (ang * (n_bins / (2.0 * np.pi))).astype(np.int32) % n_bins
-
-    out = np.full(edges.shape, -1, dtype=np.int32)
-    out[edges > 0] = bins[edges > 0]
-    return out
-
-
-def oriented_dt_bank(edges: np.ndarray, n_bins: int = 8) -> List[np.ndarray]:
-    """
-    For each orientation bin, compute distance transform to nearest edge pixel in that bin.
-    Returns list length n_bins of float32 DT images.
-    """
-    bins = edge_orientation_bins(edges, n_bins=n_bins)
-    banks: List[np.ndarray] = []
-    for b in range(n_bins):
-        m = (bins == b).astype(np.uint8) * 255
-        inv = (m == 0).astype(np.uint8) * 255
-        dt = cv2.distanceTransform(inv, cv2.DIST_L2, 3)
-        banks.append(dt)
-    return banks
-
-def oriented_chamfer_score(
-    q_edges: np.ndarray,
-    q_bins: np.ndarray,
-    t_dt_bank: List[np.ndarray],
-) -> float:
-    ys, xs = np.where(q_edges > 0)
-    if xs.size < 30:
-        return float("inf")
-    # sample DT of matching orientation bin
-    vals = []
-    for y, x in zip(ys, xs):
-        b = q_bins[y, x]
-        if b < 0:
-            continue
-        vals.append(t_dt_bank[b][y, x])
-    if not vals:
-        return float("inf")
-    return float(np.mean(vals))
-
-
-def symmetric_oriented_chamfer(
-    q_edges: np.ndarray,
-    t_edges: np.ndarray,
-    t_dt_bank: List[np.ndarray],
-    n_bins: int = 8,
-) -> float:
-    """
-    Score = oriented chamfer(query -> template) + oriented chamfer(template -> query)
-    """
-    q_bins = edge_orientation_bins(q_edges, n_bins=n_bins)
-    # forward
-    fwd = oriented_chamfer_score(q_edges, q_bins, t_dt_bank)
-
-    # backward: build query dt bank once
-    q_dt_bank = oriented_dt_bank(q_edges, n_bins=n_bins)
-    t_bins = edge_orientation_bins(t_edges, n_bins=n_bins)
-    bwd = oriented_chamfer_score(t_edges, t_bins, q_dt_bank)
-
-    return float(fwd + bwd)
 
 # -----------------------------
 # Main
@@ -761,6 +640,7 @@ def symmetric_oriented_chamfer(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Detect tag holes + rigid octagon + purple icon overlay + SVG matching.")
+
     ap.add_argument("--image", required=True)
     ap.add_argument("--out_json", default="detections.json")
     ap.add_argument("--out_debug", default="debug_overlay.png")
@@ -785,10 +665,8 @@ def main() -> None:
     ap.add_argument("--max_detections", type=int, default=0)
     ap.add_argument("--ignore_top_frac", type=float, default=0.03)
 
-    # Octagon model: apothem = beta * r, center_y = hole_y + dy_mul * r, center_x = hole_x
+    # Octagon model + align
     ap.add_argument("--oct_beta", type=float, default=5.0)
-    ap.add_argument("--oct_center_dy_mul", type=float, default=4.6)
-
     ap.add_argument("--oct_canny1", type=int, default=30)
     ap.add_argument("--oct_canny2", type=int, default=90)
     ap.add_argument("--oct_ink_dilate", type=int, default=5)
@@ -804,54 +682,37 @@ def main() -> None:
     ap.add_argument("--oct_scale_max", type=float, default=1.12)
     ap.add_argument("--oct_scale_steps", type=int, default=11)
     ap.add_argument("--oct_samples_per_edge", type=int, default=20)
-    ap.add_argument(
-        "--oct_hole_gap_mul",
-        type=float,
-        default=0.70,
-        help="Gap from top of hole to top octagon vertex, in units of hole radius r.",
-    )
 
-    # Icon overlay params
+    ap.add_argument("--oct_hole_gap_mul", type=float, default=0.70,
+                    help="Gap from top of hole to top octagon vertex, in units of r.")
+
+    # Icon overlay/match shared feature params
     ap.add_argument("--icon_alpha", type=float, default=0.65)
-    ap.add_argument("--icon_center_radius_mul", type=float, default=0.62)
-    ap.add_argument("--icon_dilate_px", type=int, default=3)
+    ap.add_argument("--icon_dilate_px", type=int, default=4)
 
-    ap.add_argument("--icon_pctl_hi", type=float, default=90.0)
-    ap.add_argument("--icon_pctl_lo", type=float, default=75.0)
-    ap.add_argument("--icon_hyst_iter", type=int, default=3)
-
-    ap.add_argument("--icon_core_radius_mul", type=float, default=0.55)
-    ap.add_argument("--icon_core_grow_iter", type=int, default=18)
+    ap.add_argument("--icon_match_center_radius_mul", type=float, default=0.70,
+                    help="Radius (as fraction of apothem) for BOTH overlay+matching mask disk.")
+    ap.add_argument("--icon_match_grad_pctl", type=float, default=92.0,
+                    help="Percentile threshold on gradient magnitude for icon edges (overlay+match).")
 
     # Icon matching
-    ap.add_argument("--icon_library_dir", default=None,
-                    help="Directory containing reference .svg icons. Filename stem becomes label.")
+    ap.add_argument("--icon_library_dir", default=None)
     ap.add_argument("--icon_template_size", type=int, default=256)
-    ap.add_argument("--icon_crop_radius_mul", type=float, default=0.70,
-                    help="Crop radius (around icon center) as fraction of apothem for matching.")
-    ap.add_argument("--icon_match_min_conf", type=float, default=0.0,
-                    help="If confidence below this, label becomes 'unknown'.")
-    ap.add_argument(
-        "--icon_allowlist",
-        default=None,
-        help="Comma-separated list of icon labels (filename stems) to consider. "
-             "Example: aws-lambda,aws-dynamodb,aws-users",
-    )
-    ap.add_argument("--icon_match_center_radius_mul", type=float, default=0.85)    
-    ap.add_argument("--icon_match_canny1", type=int, default=10)
-    ap.add_argument("--icon_match_canny2", type=int, default=40)
+    ap.add_argument("--icon_crop_radius_mul", type=float, default=0.70)
+    ap.add_argument("--icon_match_min_conf", type=float, default=0.25)
+    ap.add_argument("--icon_allowlist", default=None)
 
-    ap.add_argument("--icon_match_grad_pctl", type=float, default=92.0,
-                    help="Percentile threshold on gradient magnitude for query emboss edges.")
+    ap.add_argument("--icon_orient_bins", type=int, default=8)
+    ap.add_argument("--debug_match", action="store_true")
 
     args = ap.parse_args()
 
     bgr = cv2.imread(args.image, cv2.IMREAD_COLOR)
     if bgr is None:
         raise SystemExit(f"Failed to read image: {args.image}")
-
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     H, W = gray.shape[:2]
+
     param2_list = [float(x.strip()) for x in args.param2_list.split(",") if x.strip()]
 
     templates: List[IconTemplate] = []
@@ -861,9 +722,14 @@ def main() -> None:
         allow = None
         if args.icon_allowlist:
             allow = {s.strip() for s in args.icon_allowlist.split(",") if s.strip()}
-        templates = load_icon_templates(args.icon_library_dir, size=args.icon_template_size, allowlist=allow)
+        templates = load_icon_templates(
+            args.icon_library_dir,
+            size=int(args.icon_template_size),
+            allowlist=allow,
+            n_bins=int(args.icon_orient_bins),
+        )
         if not templates:
-            raise SystemExit(f"No .svg files found in {args.icon_library_dir}")
+            raise SystemExit(f"No .svg files found (after allowlist filter) in {args.icon_library_dir}")
 
     dets = detect_holes(
         bgr=bgr,
@@ -889,14 +755,12 @@ def main() -> None:
 
     # Build octagons
     for d in dets:
-        cx = float(d.x)  # hole is exact horizontal center
+        cx = float(d.x)
         a0 = float(args.oct_beta) * float(d.r)
         R0 = a0 / COS_22_5
-
         gap_px = float(args.oct_hole_gap_mul) * float(d.r)
 
-        # Place octagon center so the top vertex is 'gap_px' above the top of the hole
-        # hole top = y - r ; top vertex = cy - R0
+        # hole top = y - r ; top vertex = cy - R0 ; enforce gap above hole
         cy0 = (float(d.y) - float(d.r)) + R0 - gap_px
 
         pad = int(float(args.oct_pad_mul) * float(d.r))
@@ -952,62 +816,65 @@ def main() -> None:
 
     dbg = draw_debug_base(bgr, dets)
 
-    # Overlay icon + match
-    PURPLE_BGR = (255, 0, 255)
-
+    # Compute + overlay + match icons
     for d in dets:
         if d.octagon is None or d.scale is None or d.cy is None:
             continue
 
         apothem = float(args.oct_beta) * float(d.r) * float(d.scale)
 
-        keep_mask, roi_xywh, center = overlay_icon_purple_and_return_mask(
-            args,
-            debug_bgr=dbg,
-            gray=gray,
-            det=d,
-            apothem=apothem,
-            purple_bgr=PURPLE_BGR,
-            alpha=float(args.icon_alpha),
-            center_radius_mul=float(args.icon_center_radius_mul),
-            dilate_px=int(args.icon_dilate_px),
-            pctl_hi=float(args.icon_pctl_hi),
-            pctl_lo=float(args.icon_pctl_lo),
-            hyst_iter=int(args.icon_hyst_iter),
-            core_radius_mul=float(args.icon_core_radius_mul),
-            core_grow_iter=int(args.icon_core_grow_iter),
+        # ROI bbox around octagon
+        x, y, w, h = cv2.boundingRect(d.octagon)
+        x0 = max(0, x)
+        y0 = max(0, y)
+        x1 = min(W, x + w)
+        y1 = min(H, y + h)
+        if x1 <= x0 or y1 <= y0:
+            continue
+
+        roi_gray = gray[y0:y1, x0:x1]
+        roi_dbg = dbg[y0:y1, x0:x1]
+
+        # octagon mask in ROI
+        mask_oct = np.zeros((y1 - y0, x1 - x0), np.uint8)
+        poly_roi = d.octagon.copy()
+        poly_roi[:, 0, 0] -= x0
+        poly_roi[:, 0, 1] -= y0
+        cv2.fillPoly(mask_oct, [poly_roi], 255)
+
+        cx_roi = float(d.x) - x0
+        cy_roi = float(d.cy) - y0
+
+        rad = max(10, int(float(args.icon_match_center_radius_mul) * float(apothem)))
+        mask_center = np.zeros_like(mask_oct)
+        cv2.circle(mask_center, (int(round(cx_roi)), int(round(cy_roi))), rad, 255, -1)
+
+        mask = cv2.bitwise_and(mask_oct, mask_center)
+
+        # This edge mask is used for BOTH overlay and match
+        q_edges_roi = extract_icon_edges_from_gray_roi(
+            roi_gray,
+            mask,
+            pctl=float(args.icon_match_grad_pctl),
         )
 
-        if templates and roi_xywh is not None and center is not None:
-            x0, y0, rw, rh = roi_xywh
-            roi_gray = gray[y0:y0 + rh, x0:x0 + rw]
+        # Optional: thicken edges for both overlay+match
+        if int(args.icon_dilate_px) > 0:
+            k = np.ones((int(args.icon_dilate_px), int(args.icon_dilate_px)), np.uint8)
+            q_edges_roi = cv2.dilate(q_edges_roi, k, iterations=1)
 
-            cx_roi, cy_roi = center
+        overlay_mask_purple(roi_dbg, q_edges_roi, alpha=float(args.icon_alpha))
 
-            # Rebuild the SAME mask used for icon extraction:
-            # octagon mask ∩ center circle mask
-            mask_oct = np.zeros((rh, rw), np.uint8)
-            poly_roi = d.octagon.copy()
-            poly_roi[:, 0, 0] -= x0
-            poly_roi[:, 0, 1] -= y0
-            cv2.fillPoly(mask_oct, [poly_roi], 255)
-
-            rad_match = max(10, int(float(args.icon_match_center_radius_mul) * float(apothem)))
-            mask_center = np.zeros_like(mask_oct)
-            cv2.circle(mask_center, (int(round(cx_roi)), int(round(cy_roi))), rad_match, 255, -1)
-            mask = cv2.bitwise_and(mask_oct, mask_center)
-
+        if templates:
             label, conf, score, label2, score2 = match_icon(
-                args,
-                roi_gray=roi_gray,
-                mask=mask,
+                q_edges_roi=q_edges_roi,
                 cx_roi=cx_roi,
                 cy_roi=cy_roi,
                 apothem=apothem,
                 templates=templates,
                 template_size=int(args.icon_template_size),
                 crop_radius_mul=float(args.icon_crop_radius_mul),
-                n_bins=8,
+                n_bins=int(args.icon_orient_bins),
             )
 
             if conf < float(args.icon_match_min_conf):
@@ -1021,6 +888,9 @@ def main() -> None:
 
             draw_icon_label(dbg, d)
 
+            if args.debug_match:
+                print(f"[{d.x},{d.y}] best={label} score={score:.3f} conf={conf:.2f} second={label2} {score2:.3f}")
+
     out = []
     for d in dets:
         item = {
@@ -1031,7 +901,7 @@ def main() -> None:
                 "cy": d.cy,
                 "scale": d.scale,
                 "oct_beta": float(args.oct_beta),
-                "oct_center_dy_mul": float(args.oct_center_dy_mul),
+                "oct_hole_gap_mul": float(args.oct_hole_gap_mul),
             },
             "metrics": {
                 "score": d.score,
